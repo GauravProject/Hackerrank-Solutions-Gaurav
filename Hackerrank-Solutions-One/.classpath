@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER"/>
+	<classpathentry kind="src" path="HackerRankDashboard/CoreCS/Algorithms/src/main/java"/>
+	<classpathentry kind="src" path="HackerRankDashboard/CoreCS/DataStructures/src/main/java"/>
+	<classpathentry kind="src" path="HackerRankDashboard/CoreCS/GeneralProgramming/src/main/java"/>
+	<classpathentry kind="src" path="HackerRankDashboard/CoreCS/Implementation/src/main/java"/>
+	<classpathentry kind="src" path="HackerRankDashboard/Languages/Java/src/main/java"/>
+	<classpathentry kind="src" path="HackerRankDashboard/Tutorials/30DaysOfCode/src/main/java"/>
+	<classpathentry kind="src" path="HackerRankDashboard/Tutorials/CrackingTheCodingInterview/src/main/java"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>
