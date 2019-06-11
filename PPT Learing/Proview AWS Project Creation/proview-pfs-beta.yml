@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: CloudFormation template for the ECS service pfs-beta
+Metadata:
+  "AWS::CloudFormation::Interface":
+    ParameterGroups: 
+      - 
+        Label: 
+          default: "Load Balancer Configuration"
+        Parameters: 
+          - loadbalancerName
+          - commonName
+          - pathPattern
+      -
+        Label:
+          default: "Tags"
+        Parameters:
+         - FinancialIdentifier
+         - AssetInsightId
+         - Platform
+         - Environment
+         - ResourceOwner
+
+Parameters:
+  VPC: 
+    Description: The tr_vpc id for the region
+    Type: AWS::EC2::VPC::Id
+    Default: vpc-9c891dfa
+  TaskDefinitionName:
+    Description: Service task definition name.  Should be {ProviewEnvironment}-servicename
+    Type: String
+    Default: proview-ci-pfs-beta
+  TargetGroupName:
+    Description: Service target group name.  Should be {ProviewEnvironment}-servicename
+    Type: String
+    Default: proview-ci-pfs-beta
+  commonName:
+    Description: Optional (Do not specify if pathPattern); the host-header DNS name; proviewsites.ci.int.thomsonreuters.com; proviewsites.qa.int.thomsonreuters.com; proviewsites.thomsonreuters.com
+    Type: String
+    Default: pfs-beta.proviewsites.ci.int.thomsonreuters.com 
+  pathPattern:
+    Description: Optional (Do not specify if commonName); the path-pattern to use by the load balancer to forward request to the service
+    Type: String   
+  loadbalancerName:
+    Description: The name of the load balancer which will host the common name
+    Type: String
+    Default: proview-ci-proviewsites-alb
+  ECSCluster:
+    Description: The name of the ECS cluster to put the service 
+    Type: String
+    Default: proview-ci
+  ClusterScriptName:
+    Description: Cloud formation script name used to create ECS cluster
+    Type: String
+    Default: proview-ci
+  LogGroup:
+    Description: Cloud watch log group
+    Type: String
+    Default: proview-ci
+  DesiredCount:
+    Description: The number of identity processes to run
+    Type: String
+    Default: 0  
+  FinancialIdentifier: 
+    Description: "Cost Center ID"
+    Type: String
+    Default: 704615010
+  AssetInsightId: 
+    Description: Asset Insight ID
+    Type: String
+    Default: 200344
+  Platform:
+    Description: Platform tag
+    Type: String
+    Default: Proview
+  Environment:
+    Description: Environment tag
+    Type: String
+    Default: DEVELOPMENT
+    AllowedValues:
+      - DEVELOPMENT
+      - QUALITY ASSURANCE
+      - PRODUCTION
+  ResourceOwner:
+    Description: Owner tag
+    Type: String
+    Default: Thomson-MobileDev-Server@thomsonreuters.com    
+
+Conditions:
+  CreatePathPattern: !Not [!Equals [!Ref pathPattern,""]] 
+  InProdEnvironment: !Equals [!Ref Environment,"PRODUCTION"] 
+
+Resources:
+  TargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Ref TargetGroupName
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPC
+      HealthCheckPath: "/v1/statuscheck"
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 10
+      HealthCheckIntervalSeconds: 30
+      HealthyThresholdCount: 3
+      Tags:
+        -
+          Key: platform
+          Value: !Ref Platform
+        -
+          Key: tr:financial-identifier
+          Value: !Ref FinancialIdentifier
+        -
+          Key: tr:application-asset-insight-id
+          Value: !Ref AssetInsightId
+        -
+          Key: tr:environment-type
+          Value: !Ref Environment
+        -
+          Key: Name
+          Value: proview-build
+        -
+          Key: tr:resource-owner
+          Value: !Ref ResourceOwner          
+
+  TaskDef:  
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ContainerDefinitions:
+        -
+          Name: nginx
+          Cpu: 512
+          MemoryReservation: 512
+          PortMappings:
+            -
+              ContainerPort: 80
+              Protocol: tcp
+          Privileged: true
+          Essential: true
+          Image: "docker.int.thomsonreuters.com:5001/proview/proview-pfs-site-site/proview-pfs-beta-nginx:latest"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: !Join ["-",[!Ref TaskDefinitionName,"nginx"]]
+          Environment:
+            -
+              Name: environment
+              Value: !Ref Environment
+          Links:
+            - app
+                
+        -
+          Name: app
+          Cpu: 512
+          MemoryReservation: 512
+          PortMappings:
+            -
+              ContainerPort: 3000
+              Protocol: tcp
+          Privileged: true
+          Essential: true
+          Image: "docker.int.thomsonreuters.com:5001/proview/proview-pfs-site-site/proview-pfs-beta-app:20180730.1"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: us-east-1
+              awslogs-stream-prefix: !Ref TaskDefinitionName
+                
+      Family: !Ref TaskDefinitionName
+      NetworkMode: bridge
+      TaskRoleArn: 
+        "Fn::ImportValue": !Sub "${ClusterScriptName}-AMIContainerTaskRole"
+        
+  loadbalancerInfo:
+    Type: "Custom::loadbalancerInfo"
+    Properties:
+      ServiceToken: !If [InProdEnvironment,"arn:aws:lambda:us-east-1:612360232994:function:Proview-CloudFormation-LB-Rule-Lookup","arn:aws:lambda:us-east-1:980461583422:function:Proview-CloudFormation-LB-Rule-Lookup"]
+      loadbalancerName:
+        !Ref loadbalancerName
+
+  InternalPublicListener:
+    Type: "AWS::ElasticLoadBalancingV2::ListenerRule"
+    DependsOn:
+      - loadbalancerInfo
+    Properties:
+      Actions:
+        -
+          TargetGroupArn: !Ref TargetGroup
+          Type: forward
+      Conditions:
+        -
+          Field: !If [CreatePathPattern,path-pattern,host-header]
+          Values: 
+            - !If [CreatePathPattern,!Ref pathPattern,!Ref commonName]
+      ListenerArn: !GetAtt loadbalancerInfo.ListenerArn
+      Priority: !GetAtt loadbalancerInfo.Priority             
+  serviceDef:
+    Type: AWS::ECS::Service
+    DependsOn:
+     - InternalPublicListener
+    Properties:
+      Role:
+        "Fn::ImportValue": !Sub "${ClusterScriptName}-AMIServiceRole"
+      TaskDefinition:
+        !Ref TaskDef
+      DesiredCount: 0
+      LoadBalancers:
+        - 
+          TargetGroupArn:
+            !Ref TargetGroup
+          ContainerPort: 80
+          ContainerName: nginx
+      Cluster:
+        !Ref ECSCluster
+      ServiceName: pfs-beta
